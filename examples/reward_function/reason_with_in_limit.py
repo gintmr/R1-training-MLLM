@@ -77,7 +77,7 @@ def compute_score(reward_input: dict[str, Any]) -> dict[str, float]:
     response_length = int(reward_input['response_length'])
     budget_and_tokens = int(reward_input['budget_and_tokens'])
     origin_response_length = reward_input['origin_response_length']
-    print(f'origin_response_length = {origin_response_length}')
+    # print(f'origin_response_length = {origin_response_length}')
 
     length_reward = get_length_reward(origin_response_length, budget_and_tokens)
     format_score = format_reward(reward_input["response"])

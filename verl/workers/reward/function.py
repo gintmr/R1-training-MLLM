@@ -95,7 +95,7 @@ class SequentialFunctionRewardManager(FunctionRewardManager):
             response_str = self.tokenizer.decode(
                 valid_response_ids, skip_special_tokens=self.config.skip_special_tokens
             )
-            print(f"Response: {response_str}")
+            # print(f"Response: {response_str}")
             score = self.reward_fn(
                 {
                     "response": response_str,
