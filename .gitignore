@@ -182,3 +182,7 @@ tensorboard_log/
 # data
 images/
 images*
+checkpoints/
+tensorboard_log/
+wandb/
+nohup.out

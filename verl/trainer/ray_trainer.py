@@ -20,6 +20,7 @@ import json
 import os
 import uuid
 from collections import defaultdict
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import IntEnum, auto
@@ -43,6 +44,7 @@ from ..utils.py_functional import convert_dict_to_str, timer, unflatten_dict
 from ..utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seqlen_unbalance
 from ..workers.fsdp_workers import FSDPWorker
 from ..workers.reward import FunctionRewardManager
+from .model_merger import merge_model_shards,reorganize_folders
 from .config import PPOConfig
 from .core_algos import (
     AdvantageEstimator,
@@ -190,6 +192,10 @@ class RayPPOTrainer:
         self.resource_pool_manager = resource_pool_manager
         self.use_reward_model = Role.RewardModel in role_worker_mapping
         self.ray_worker_group_cls = ray_worker_group_cls
+        
+        self.max_accu = 0
+        self.current_reward_accu=-1
+        
 
         # define KL control
         if config.algorithm.disable_kl:
@@ -339,6 +345,28 @@ class RayPPOTrainer:
         with open(checkpointer_tracker_path, "w") as f:
             json.dump(checkpointer_tracker_info, f, ensure_ascii=False, indent=2)
 
+
+
+    def _save_checkpoin_maxaccu(self) -> None:
+        # path: {save_checkpoint_path}/global_step_{global_step}/{actor,critic}
+
+        import re
+        checkpoint_folder = self.config.trainer.save_checkpoint_path
+        folder_path = os.path.join(self.config.trainer.save_checkpoint_path, f"step_{self.global_step}_reward_{self.max_accu}")
+        actor_path = os.path.join(folder_path, "actor")
+        self.actor_rollout_ref_wg.save_checkpoint(actor_path, save_model_only=self.config.trainer.save_model_only)
+
+        if self.use_critic:
+            critic_path = os.path.join(folder_path, "critic")
+            self.critic_wg.save_checkpoint(critic_path, save_model_only=False)
+            
+        merge_model_shards(local_dir=actor_path)
+        reorganize_folders(folder_path)
+
+        
+
+
+
     def _load_checkpoint(self) -> None:
         if self.config.trainer.load_checkpoint_path is not None:
             load_checkpoint_path = self.config.trainer.load_checkpoint_path
@@ -444,6 +472,12 @@ class RayPPOTrainer:
         val_reward_metrics = {f"val/{key}_reward": value for key, value in reduce_metrics(reward_metrics_lst).items()}
         val_length_metrics = {f"val_{key}": value for key, value in reduce_metrics(length_metrics_lst).items()}
         print("Finish validation.")
+
+        #g 更新当前accu
+        self.current_reward_accu = val_reward_metrics['val/accuracy_reward']
+        self.max_accu = max(self.max_accu, self.current_reward_accu)
+
+
         return {"val/reward_score": self.val_reward_score, **val_reward_metrics, **val_length_metrics}
 
     def _balance_batch(self, batch: DataProto, metrics: dict[str, Any], logging_prefix: str = "global_seqlen") -> None:
@@ -677,6 +711,12 @@ class RayPPOTrainer:
                 if self.config.trainer.save_freq > 0 and self.global_step % self.config.trainer.save_freq == 0:
                     with timer("save_checkpoint", timing_raw):
                         self._save_checkpoint()
+                
+
+                #g 保存validation效果最好的checkpoint
+                if self.current_reward_accu == self.max_accu:
+                    with timer("save_checkpoint", timing_raw):
+                        self._save_checkpoin_maxaccu()
 
             # collect metrics
             num_gpus = self.resource_pool_manager.get_num_gpus()

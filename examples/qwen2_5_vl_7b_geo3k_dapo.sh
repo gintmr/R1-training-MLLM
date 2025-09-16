@@ -4,13 +4,12 @@ set -x
 
 export PYTHONUNBUFFERED=1
 
-MODEL_PATH=Qwen/Qwen2.5-VL-7B-Instruct  # replace it with your local file path
+MODEL_PATH=/mnt/lyc/wuxinrui/RoboBrain-2/HF_Models/BAAI-RoboBrain2.0-7B
 
 python3 -m verl.trainer.main \
     config=examples/config.yaml \
     data.train_files=hiyouga/geometry3k@train \
     data.val_files=hiyouga/geometry3k@test \
-    data.mini_rollout_batch_size=128 \
     worker.actor.model.model_path=${MODEL_PATH} \
     worker.actor.clip_ratio_low=0.2 \
     worker.actor.clip_ratio_high=0.28 \

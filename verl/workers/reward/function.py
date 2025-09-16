@@ -84,18 +84,25 @@ class SequentialFunctionRewardManager(FunctionRewardManager):
         reward_tensor = torch.zeros_like(data.batch["responses"], dtype=torch.float32)
         reward_metrics = defaultdict(list)
         response_ids = data.batch["responses"]
+        budget_and_tokens = data.batch["budget_and_tokens"]
+        origin_response_length = data.batch["origin_response_length"]
         response_length = torch.sum(data.batch["response_mask"], dim=-1)
         for i in range(len(data)):
             cur_response_length = int(response_length[i].item())  # avoid tensor indexing error
+            cur_origin_response_length = int(origin_response_length[i].item())
+            cur_budget_and_tokens = int(budget_and_tokens[i].item())
             valid_response_ids = response_ids[i][:cur_response_length]
             response_str = self.tokenizer.decode(
                 valid_response_ids, skip_special_tokens=self.config.skip_special_tokens
             )
+            print(f"Response: {response_str}")
             score = self.reward_fn(
                 {
                     "response": response_str,
                     "response_length": cur_response_length,
                     "ground_truth": data.non_tensor_batch["ground_truth"][i],
+                    "budget_and_tokens": cur_budget_and_tokens,
+                    "origin_response_length": cur_origin_response_length,
                 }
             )
             reward_tensor[i, cur_response_length - 1] = score["overall"]
@@ -105,12 +112,15 @@ class SequentialFunctionRewardManager(FunctionRewardManager):
         return reward_tensor, reward_metrics
 
 
+
+
 class BatchFunctionRewardManager(FunctionRewardManager):
     reward_fn: BatchRewardFunction
 
     def compute_reward(self, data: DataProto) -> Tuple[torch.Tensor, dict[str, list[float]]]:
         reward_inputs = []
         response_ids = data.batch["responses"]
+        budget_and_tokens = data.batch["budget_and_tokens"]
         response_length = torch.sum(data.batch["response_mask"], dim=-1)
         for i in range(len(data)):
             cur_response_length = int(response_length[i].item())  # avoid tensor indexing error
@@ -118,11 +128,13 @@ class BatchFunctionRewardManager(FunctionRewardManager):
             response_str = self.tokenizer.decode(
                 valid_response_ids, skip_special_tokens=self.config.skip_special_tokens
             )
+            print(f"Response: {response_str}")
             reward_inputs.append(
                 {
                     "response": response_str,
                     "response_length": cur_response_length,
                     "ground_truth": data.non_tensor_batch["ground_truth"][i],
+                    "budget_and_tokens": budget_and_tokens,
                 }
             )
 

@@ -44,5 +44,8 @@ class RolloutConfig:
     response_length: int = field(default=-1, init=False)
     trust_remote_code: bool = field(default=False, init=False)
 
+    budget: int = field(default=-1, init=False)
+    stage: int = field(default=-1, init=False)
+
     def to_dict(self):
         return asdict(self)

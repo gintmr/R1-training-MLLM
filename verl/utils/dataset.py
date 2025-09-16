@@ -17,6 +17,7 @@ import os
 from collections import defaultdict
 from io import BytesIO
 from typing import Any, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
 import torch
@@ -35,6 +36,19 @@ from . import torch_functional as VF
 def collate_fn(features: list[dict[str, Any]]) -> dict[str, Any]:
     tensors = defaultdict(list)
     non_tensors = defaultdict(list)
+
+
+
+
+
+
+    # budget = int(os.getenv('budget', '100'))
+    # stage = int(os.getenv('stage', '1'))
+    # non_tensors["stage"] = np.array([stage] * len(features), dtype=object)
+    # non_tensors["budget"] = np.array([budget] * len(features), dtype=object)
+
+
+
     for feature in features:
         for key, value in feature.items():
             if isinstance(value, torch.Tensor):
@@ -121,7 +135,8 @@ class RLHFDataset(Dataset):
         self.truncation = truncation
         self.min_pixels = min_pixels
         self.max_pixels = max_pixels
-
+        budget = int(os.getenv('budget', '100'))
+        self.budget = budget
         if "@" in data_path:
             data_path, data_split = data_path.split("@")
         else:
@@ -152,6 +167,16 @@ class RLHFDataset(Dataset):
 
     def _build_messages(self, example: dict[str, Any]) -> list[dict[str, Any]]:
         prompt_str: str = example[self.prompt_key]
+        
+        budget = self.budget
+        if "<think>" in prompt_str:
+            prompt_str = prompt_str.replace("<think>", "")
+        post_prompt = f"Carefully analyze the multiple-choice question above and reason through it step by step. Conclude your response with a line in the following format: $LETTER (without quotes), where $LETTER is the letter of the correct choice.\n(Complete thinking within {budget} tokens or fewer, 2 special tokens (  \n<remaining>2/3</remaining>\n , \n<remaining>1/3</remaining>\n ) will split the thinking process into 3 parts.)<think>"
+
+        
+        prompt_str = prompt_str + post_prompt
+        # print(f"prompt_str = {prompt_str}")
+        
         if self.format_prompt:
             format_prompt = Template(self.format_prompt.strip())
             prompt_str = format_prompt.render(content=prompt_str)
@@ -300,4 +325,6 @@ class RLHFDataset(Dataset):
         example["position_ids"] = position_ids
         example["raw_prompt_ids"] = raw_prompt_ids
         example["ground_truth"] = example.pop(self.answer_key)
+        # example["budget"] = self.budget
+        
         return example

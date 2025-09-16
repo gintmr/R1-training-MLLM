@@ -138,6 +138,9 @@ class vLLMRollout(BaseRollout):
 
         print(f"Sampling params: {sampling_kwargs}.")
         self.sampling_params = SamplingParams(**sampling_kwargs)
+        self.tokenizer = tokenizer
+        self.stage = os.environ.get("stage", "1")
+        print("#"*50 + f"stage = {self.stage}" + "#"*50)
 
     @contextmanager
     def update_sampling_params(self, **kwargs):
@@ -158,6 +161,9 @@ class vLLMRollout(BaseRollout):
     @torch.no_grad()
     def generate_sequences(self, prompts: DataProto) -> DataProto:
         # left-padded attention_mask
+        # print(f"prompts = {prompts}")
+        # print(f"prompts.batch = {prompts.batch}")
+        # print(f"prompts.non_tensor_batch = {prompts.non_tensor_batch}")
         input_ids: torch.Tensor = prompts.batch["input_ids"]  # (bs, prompt_length)
         attention_mask: torch.Tensor = prompts.batch["attention_mask"]
         position_ids: torch.Tensor = prompts.batch["position_ids"]
@@ -169,6 +175,31 @@ class vLLMRollout(BaseRollout):
         batch_multi_modal_data = non_tensor_batch.pop("multi_modal_data", None)
         if batch_size != len(batch_raw_prompt_ids):
             raise RuntimeError("vllm sharding manager is not work properly.")
+
+
+        #g 添加调试信息：打印解码后的prompt字符串（包含特殊token）
+        # print("\n===== DEBUG: Prompt Decoding =====")
+        # for i, raw_prompt_ids in enumerate(batch_raw_prompt_ids):
+        #     # 使用skip_special_tokens=False确保特殊token也能被解码显示
+        #     prompt_str = self.tokenizer.decode(raw_prompt_ids, skip_special_tokens=False)
+        #     print(f"Prompt {i}:")
+        #     print(f"Token IDs: {raw_prompt_ids}")
+        #     print(f"Decoded String (with special tokens): {repr(prompt_str)}")
+            
+        #     # 同时显示跳过特殊token的版本作为对比
+        #     normal_str = self.tokenizer.decode(raw_prompt_ids, skip_special_tokens=True)
+        #     print(f"Decoded String (without special tokens): {repr(normal_str)}")
+            
+        #     # 如果需要，还可以打印每个token的对应文本
+        #     print("Token-by-token decoding:")
+        #     for j, token_id in enumerate(raw_prompt_ids):
+        #         token_str = self.tokenizer.decode([token_id], skip_special_tokens=False)
+        #         print(f"  Token {j}: ID={token_id}, Text={repr(token_str)}")
+            
+        #     print("-" * 50)
+        # print("===== END DEBUG =====\n")
+
+
 
         if batch_multi_modal_data is not None:
             vllm_inputs = []
@@ -187,23 +218,115 @@ class vLLMRollout(BaseRollout):
         else:
             vllm_inputs = [{"prompt_token_ids": list(raw_prompt_ids)} for raw_prompt_ids in batch_raw_prompt_ids]
 
+        budget = self.config.budget
+        print(f"budget in rollout = {budget}")
+        budget_and_tokens = budget + 2
+        
         # users can customize different sampling_params at different run
         with self.update_sampling_params(**prompts.meta_info):
-            completions: list[RequestOutput] = self.inference_engine.generate(
-                prompts=vllm_inputs, sampling_params=self.sampling_params, use_tqdm=self.use_tqdm
+            max_tokens = (budget_and_tokens + (budget_and_tokens // 4)) if (budget_and_tokens + (budget_and_tokens // 4)) <= (self.config.response_length - 20) else (self.config.response_length - 20)
+            print(f"$$$$$$$$$$$$max_tokens = {max_tokens}$$$$$$$$$$$$$$$")
+            cut_params = {"max_tokens": max_tokens}
+            with self.update_sampling_params(**cut_params):
+                print(f"self.sampling_params =  {self.sampling_params}")
+                completions: list[RequestOutput] = self.inference_engine.generate(
+                    prompts=vllm_inputs, sampling_params=self.sampling_params, use_tqdm=self.use_tqdm
+                )
+                response_ids = [output.token_ids for completion in completions for output in completion.outputs]
+                #g 获取原始response长度
+                origin_response_length = [len(output) for output in response_ids]
+                truncated_response_ids = []
+                for tokens in response_ids:
+                    if len(tokens) > (budget_and_tokens):
+                        # 超过 budget_and_tokens 的部分截断
+                        truncated_tokens = tokens[:(budget_and_tokens)]
+                    else:
+                        # 不足 budget_and_tokens 的保留原样
+                        truncated_tokens = tokens
+                    truncated_response_ids.append(truncated_tokens)
+                response_ids = truncated_response_ids
+                
+
+                if self.sampling_params.n > 1:
+                    batch_size = batch_size * self.sampling_params.n
+                    input_ids = _repeat_interleave(input_ids, self.sampling_params.n)
+                    attention_mask = _repeat_interleave(attention_mask, self.sampling_params.n)
+                    position_ids = _repeat_interleave(position_ids, self.sampling_params.n)
+                    if batch_multi_modal_data is not None:
+                        batch_multi_modal_data = _repeat_interleave(batch_multi_modal_data, self.sampling_params.n)
+
+        
+        #g =========2-stage inference============g#
+        # import random
+        # if os.environ['steady'] == "FULLv4":
+        #     self.stage = "1" if random.random() < 0.5 else "2"
+            
+        # print(f"self.stage = {self.stage}\n" * 20)
+        
+        # if self.stage == "2":
+        print(f"origin_stage = {self.stage}\n")
+        stage = self.config.stage
+        current_stage = str(stage)
+        print(f"current_stage = {current_stage}\n" * 10)
+        
+        if current_stage == "2":
+            print("2 stage inference!!!!!!!!!!!!!")
+            final_prompt_str = "</think><answer>"
+            final_prompt_token_ids = self.tokenizer.encode(final_prompt_str, add_special_tokens=False)
+
+            # 更新 vllm_inputs，添加 final_prompt_str
+            vllm_inputs = []
+            for i in range(len(response_ids)):
+                # 将 response_ids 转换为字符串
+                prompt_str = self.tokenizer.decode(input_ids[i], skip_special_tokens=False)
+                response_str = self.tokenizer.decode(response_ids[i], skip_special_tokens=False)
+                # 在末尾添加 final_prompt_str
+                updated_response_str = prompt_str + response_str + final_prompt_str
+                print(f"updated_response_str = {updated_response_str}")
+                # 将更新后的字符串重新编码为 token_ids
+                updated_response_ids = self.tokenizer.encode(updated_response_str, add_special_tokens=False)
+                vllm_inputs.append({"prompt_token_ids": updated_response_ids})
+                
+            # print(f"len of vllm_inputs = {len(vllm_inputs)}")
+            #! point1 : 手动设置采样参数，因为是二阶段推理过程，不可使用原来的采样五倍
+            answer_max_length = 100
+            default_sampling_params = SamplingParams(n=1, max_tokens=answer_max_length, temperature=1.0)
+            completions_final: list[RequestOutput] = self.inference_engine.generate(
+                prompts=vllm_inputs, sampling_params=default_sampling_params, use_tqdm=self.use_tqdm
             )
-            response_ids = [output.token_ids for completion in completions for output in completion.outputs]
-            response_ids = VF.pad_2d_list_to_length(
-                response_ids, self.pad_token_id, max_length=self.config.response_length
+            final_response_ids = [output.token_ids for completion in completions_final for output in completion.outputs]
+            
+            
+            #g 拼接一阶段和二阶段的输出
+            full_response_ids = []
+            for i in range(len(response_ids)):
+                # print(f"response_ids[i] = {response_ids[i]}")
+                combined_response = response_ids[i] + tuple(final_prompt_token_ids) + final_response_ids[i]
+                full_response_ids.append(combined_response)
+            
+            #g 在完成第二阶段推理后进行 padding
+            #ddd 此处padding至6850
+            padding_max_length = self.config.response_length + answer_max_length + 10 #g +10是为了统一所有的max_length
+            full_response_ids = VF.pad_2d_list_to_length(
+                full_response_ids, self.pad_token_id, max_length=padding_max_length
             ).to(input_ids.device)
 
-            if self.sampling_params.n > 1:
-                batch_size = batch_size * self.sampling_params.n
-                input_ids = _repeat_interleave(input_ids, self.sampling_params.n)
-                attention_mask = _repeat_interleave(attention_mask, self.sampling_params.n)
-                position_ids = _repeat_interleave(position_ids, self.sampling_params.n)
-                if batch_multi_modal_data is not None:
-                    batch_multi_modal_data = _repeat_interleave(batch_multi_modal_data, self.sampling_params.n)
+            # print(f"final_response_ids.shape = {final_response_ids.shape}")
+            response_ids = full_response_ids
+
+        #g =========2-stage inference============g#
+        
+        else:
+            response_ids = VF.pad_2d_list_to_length(
+                    response_ids, self.pad_token_id, max_length=self.config.response_length
+                ).to(input_ids.device)
+
+        # print(f"response_ids.shape: {response_ids.shape}")
+        # print(f"input_ids.shape: {input_ids.shape}")
+
+
+
+
 
         sequence_ids = torch.cat([input_ids, response_ids], dim=-1)
         response_length = response_ids.size(1)
@@ -225,6 +348,8 @@ class vLLMRollout(BaseRollout):
         # all the tp ranks should contain the same data here. data in all ranks are valid
         batch = TensorDict(
             {
+                "budget_and_tokens": [budget_and_tokens] * len(origin_response_length),  #g 将budget_and_tokens作为tensor传入返回字典，方便reward函数调用
+                "origin_response_length": origin_response_length,
                 "prompts": input_ids,
                 "responses": response_ids,
                 "input_ids": sequence_ids,  # here input_ids become the whole sentences
