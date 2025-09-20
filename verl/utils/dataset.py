@@ -171,7 +171,16 @@ class RLHFDataset(Dataset):
         budget = self.budget
         if "<think>" in prompt_str:
             prompt_str = prompt_str.replace("<think>", "")
-        post_prompt = f"Carefully analyze the multiple-choice question above and reason through it step by step. Conclude your response with a line in the following format: $LETTER (without quotes), where $LETTER is the letter of the correct choice.\n(Complete thinking within {budget} tokens or fewer, 2 special tokens (  \n<remaining>2/3</remaining>\n , \n<remaining>1/3</remaining>\n ) will split the thinking process into 3 parts.)<think>"
+
+
+        remaining_mode = os.getenv('remaining', 'default')
+        if remaining_mode == "default":
+            post_prompt = f"Carefully analyze the multiple-choice question above and reason through it step by step. Conclude your response with a line in the following format: $LETTER (without quotes), where $LETTER is the letter of the correct choice.\n(Complete thinking within {budget} tokens or fewer)<think>"
+        elif remaining_mode == "3ratio":
+            post_prompt = f"Carefully analyze the multiple-choice question above and reason through it step by step. Conclude your response with a line in the following format: $LETTER (without quotes), where $LETTER is the letter of the correct choice.\n(Complete thinking within {budget} tokens or fewer, 2 special tokens (  \n<remaining>2/3</remaining>\n , \n<remaining>1/3</remaining>\n ) will split the thinking process into 3 parts.)<think>"
+        else:
+            raise ValueError(f"Unknown remaining mode: {remaining_mode}")
+
 
         
         prompt_str = prompt_str + post_prompt

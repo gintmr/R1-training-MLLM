@@ -96,7 +96,7 @@ def compute_score(reward_input: dict[str, Any]) -> dict[str, float]:
         "length_reward": length_reward,
         "overall": overall_score,
         "raw_answer": raw_answer,
-        "response_length": origin_response_length,
+        "response_length": response_length,
         "budget_and_tokens": budget_and_tokens,
         "origin_response_length": origin_response_length,
     }

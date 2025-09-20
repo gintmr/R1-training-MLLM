@@ -360,7 +360,6 @@ class RayPPOTrainer:
         # path: {save_checkpoint_path}/global_step_{global_step}/{actor,critic}
 
         import re
-        checkpoint_folder = self.config.trainer.save_checkpoint_path
         folder_path = os.path.join(self.config.trainer.save_checkpoint_path, f"step_{self.global_step}_reward_{self.max_accu}")
         actor_path = os.path.join(folder_path, "actor")
         self.actor_rollout_ref_wg.save_checkpoint(actor_path, save_model_only=self.config.trainer.save_model_only)
