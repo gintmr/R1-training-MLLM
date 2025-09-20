@@ -32,7 +32,7 @@ algorithm:
 
 worker:
   actor:
-    global_batch_size: 64  # equivalent to verl's actor.ppo_mini_batch_size
+    global_batch_size: 63  # equivalent to verl's actor.ppo_mini_batch_size
     micro_batch_size_per_device_for_update: 1  # equivalent to verl's actor.ppo_micro_batch_size_per_gpu
     micro_batch_size_per_device_for_experience: 1  # equivalent to verl's rollout.log_prob_micro_batch_size_per_gpu
     max_grad_norm: 1.0
@@ -68,7 +68,12 @@ worker:
     tensor_parallel_size: 1
     max_num_batched_tokens: 120000
     disable_tqdm: false
-    budget: 200
+    all_epochs_budget_list:
+      - [100, 150, 200]
+      - [100, 150, 200]
+      - [30, 50, 100]
+      - [30, 50, 100]
+      - [30, 50, 100, 150, 200]
     stage: 2
     val_override_config:
       temperature: 0.6
@@ -89,7 +94,7 @@ worker:
     skip_special_tokens: false
 
 trainer:
-  total_epochs: 1
+  total_epochs: 4
   max_steps: null
   project_name: robobrain7b_3ratio_SFT_RL_v1
   experiment_name: robobrain7b_3ratio_SFT_RL_v1
@@ -105,6 +110,6 @@ trainer:
   save_limit: 2  # -1 to disable
   save_model_only: false
   save_checkpoint_path: null
-  load_checkpoint_path: /data2/wuxinrui/R1-training-MLLM/checkpoints/robobrain7b_3ratio_SFT_RL_v1/robobrain7b_3ratio_SFT_RL_v3/global_step_17
+  load_checkpoint_path: null
   find_last_checkpoint: true
   

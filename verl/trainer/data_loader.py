@@ -23,7 +23,9 @@ from ..utils.dataset import RLHFDataset, collate_fn
 from .config import DataConfig
 
 
-def create_dataloader(config: DataConfig, tokenizer: PreTrainedTokenizer, processor: Optional[ProcessorMixin]) -> None:
+def create_dataloader(config: DataConfig, tokenizer: PreTrainedTokenizer, processor: Optional[ProcessorMixin], current_budget:int) -> None:
+
+
     train_dataset = RLHFDataset(
         data_path=config.train_files,
         tokenizer=tokenizer,
@@ -41,7 +43,13 @@ def create_dataloader(config: DataConfig, tokenizer: PreTrainedTokenizer, proces
         max_pixels=config.max_pixels,
         filter_overlong_prompts=config.filter_overlong_prompts,
         filter_overlong_prompts_workers=config.filter_overlong_prompts_workers,
+        current_budget=current_budget,
+        
     )
+    
+    
+    
+    
     # use sampler for better ckpt resume
     if config.shuffle:
         train_dataloader_generator = torch.Generator()
@@ -81,6 +89,7 @@ def create_dataloader(config: DataConfig, tokenizer: PreTrainedTokenizer, proces
         min_pixels=config.min_pixels,
         max_pixels=config.max_pixels,
         filter_overlong_prompts=config.filter_overlong_prompts,
+        current_budget=current_budget,
     )
 
     if config.val_batch_size == -1:

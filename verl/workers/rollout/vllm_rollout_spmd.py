@@ -167,6 +167,9 @@ class vLLMRollout(BaseRollout):
         input_ids: torch.Tensor = prompts.batch["input_ids"]  # (bs, prompt_length)
         attention_mask: torch.Tensor = prompts.batch["attention_mask"]
         position_ids: torch.Tensor = prompts.batch["position_ids"]
+        budget = int(prompts.batch["budget"][0])
+        print(f"#### budget in rollout = {budget} ####")
+        budget_and_tokens = budget + 2
         eos_token_id: int = prompts.meta_info["eos_token_id"]
         batch_size = input_ids.size(0)
 
@@ -218,9 +221,7 @@ class vLLMRollout(BaseRollout):
         else:
             vllm_inputs = [{"prompt_token_ids": list(raw_prompt_ids)} for raw_prompt_ids in batch_raw_prompt_ids]
 
-        budget = self.config.budget
-        print(f"budget in rollout = {budget}")
-        budget_and_tokens = budget + 2
+
         
         # users can customize different sampling_params at different run
         with self.update_sampling_params(**prompts.meta_info):
@@ -282,7 +283,7 @@ class vLLMRollout(BaseRollout):
                 response_str = self.tokenizer.decode(response_ids[i], skip_special_tokens=False)
                 # 在末尾添加 final_prompt_str
                 updated_response_str = prompt_str + response_str + final_prompt_str
-                print(f"updated_response_str = {updated_response_str}")
+                # print(f"updated_response_str = {updated_response_str}")
                 # 将更新后的字符串重新编码为 token_ids
                 updated_response_ids = self.tokenizer.encode(updated_response_str, add_special_tokens=False)
                 vllm_inputs.append({"prompt_token_ids": updated_response_ids})

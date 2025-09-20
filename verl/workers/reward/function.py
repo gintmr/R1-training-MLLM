@@ -87,6 +87,7 @@ class SequentialFunctionRewardManager(FunctionRewardManager):
         budget_and_tokens = data.batch["budget_and_tokens"]
         origin_response_length = data.batch["origin_response_length"]
         response_length = torch.sum(data.batch["response_mask"], dim=-1)
+        batch_eval_sample_list = []
         for i in range(len(data)):
             cur_response_length = int(response_length[i].item())  # avoid tensor indexing error
             cur_origin_response_length = int(origin_response_length[i].item())
@@ -95,8 +96,14 @@ class SequentialFunctionRewardManager(FunctionRewardManager):
             response_str = self.tokenizer.decode(
                 valid_response_ids, skip_special_tokens=self.config.skip_special_tokens
             )
+            
+            special_tokens_list = ["<|im_start|>","<|im_end|>","<|object_ref_start|>","<|object_ref_end|>","<|box_start|>","<|box_end|>","<|quad_start|>","<|quad_end|>","<|vision_start|>","<|vision_end|>","<|vision_pad|>","<|image_pad|>","<|video_pad|>","<|im_end|>","<|endoftext|>"]
+            for special_token in special_tokens_list:
+                if special_token in response_str:
+                    response_str = response_str.replace(special_token, "")
+
             # print(f"Response: {response_str}")
-            score = self.reward_fn(
+            score, eval_sample = self.reward_fn(
                 {
                     "response": response_str,
                     "response_length": cur_response_length,
@@ -108,8 +115,10 @@ class SequentialFunctionRewardManager(FunctionRewardManager):
             reward_tensor[i, cur_response_length - 1] = score["overall"]
             for key, value in score.items():
                 reward_metrics[key].append(value)
+            
+            batch_eval_sample_list.append(eval_sample)
 
-        return reward_tensor, reward_metrics
+        return reward_tensor, reward_metrics, batch_eval_sample_list
 
 
 

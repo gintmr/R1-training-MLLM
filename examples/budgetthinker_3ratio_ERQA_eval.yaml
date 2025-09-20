@@ -68,7 +68,8 @@ worker:
     tensor_parallel_size: 1
     max_num_batched_tokens: 120000
     disable_tqdm: false
-    budget: 200
+    all_epochs_budget_list:
+      - [150]    
     stage: 2
     val_override_config:
       temperature: 0.6
@@ -98,13 +99,13 @@ trainer:
   n_gpus_per_node: 8
   max_try_make_batch: 20  # -1 means no limit
   val_freq: 1  # -1 to disable
-  val_before_train: false
-  val_only: false
+  val_before_train: true
+  val_only: true
   val_generations_to_log: 3
   save_freq: 1  # -1 to disable
   save_limit: 2  # -1 to disable
   save_model_only: false
   save_checkpoint_path: null
-  load_checkpoint_path: /data2/wuxinrui/R1-training-MLLM/checkpoints/robobrain7b_3ratio_SFT_RL_v1/robobrain7b_3ratio_SFT_RL_v3/global_step_17
+  load_checkpoint_path: null
   find_last_checkpoint: true
   

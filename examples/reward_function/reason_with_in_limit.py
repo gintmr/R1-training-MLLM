@@ -19,7 +19,8 @@ from mathruler.grader import grade_answer
 
 
 def format_reward(response: str) -> float:
-    pattern = re.compile(r"<think>.*?</think>\s*<answer>.*?</answer>", re.DOTALL)
+    pattern = re.compile(r".*?</think>\s*<answer>.*?</answer>", re.DOTALL)
+    # pattern = re.compile(r"<think>.*?</think>\s*<answer>.*?</answer>", re.DOTALL)
     format_match = re.fullmatch(pattern, response)
     return 1.0 if format_match else 0.0
 
@@ -30,6 +31,7 @@ def accuracy_reward(response: str, ground_truth: str) -> float:
         given_answer = content_match.group(1).strip() if content_match else response.strip()
         print(f'given_answer = {given_answer}')
         print(f'ground_truth = {ground_truth}')
+        raw_answer = given_answer
         if "<think>" in given_answer:
             given_answer.replace("<think>", "")
         if "</think>" in given_answer:
@@ -39,25 +41,25 @@ def accuracy_reward(response: str, ground_truth: str) -> float:
         if "</answer>" in given_answer:
             given_answer.replace("</answer>", "")
         
-        choises_list = ["A", "B", "C", "D", "E", "F", "G", "H", "a", "b", "c", "d", "e", "f", "g", "h"]
+        # choises_list = ["A", "B", "C", "D", "E", "F", "G", "H"]
         
-        for choice in choises_list:
-            if f"{choice}" in given_answer:
-                given_answer = choice
-            if f"{choice}." in given_answer:
-                given_answer = choice
+        # for choice in choises_list:
+        #     # if f"{choice}" in given_answer:
+        #     #     given_answer = choice
+        #     if f"{choice}." in given_answer:
+        #         given_answer = choice
             
 
         print(f'given_answer = {given_answer}')
         print(f'ground_truth = {ground_truth}')
 
         if grade_answer(given_answer, ground_truth.strip()):
-            return 1.0
+            return 1.0, raw_answer
 
     except Exception:
         pass
 
-    return 0.0
+    return 0.0, raw_answer
 
 def get_length_reward(response_length, budget):
     if response_length <= budget:
@@ -81,12 +83,27 @@ def compute_score(reward_input: dict[str, Any]) -> dict[str, float]:
 
     length_reward = get_length_reward(origin_response_length, budget_and_tokens)
     format_score = format_reward(reward_input["response"])
-    accuracy_score = accuracy_reward(reward_input["response"], reward_input["ground_truth"])
+    accuracy_score, raw_answer = accuracy_reward(reward_input["response"], reward_input["ground_truth"])
     print(f'accuracy_score = {accuracy_score}')
     
+    overall_score = 0.65 * accuracy_score + 0.2 * format_score + 0.15 * length_reward
+    
+    eval_sample = {
+        "response": reward_input["response"],
+        "ground_truth": reward_input["ground_truth"],
+        "format_score": format_score,
+        "accuracy_score": accuracy_score,
+        "length_reward": length_reward,
+        "overall": overall_score,
+        "raw_answer": raw_answer,
+        "response_length": origin_response_length,
+        "budget_and_tokens": budget_and_tokens,
+        "origin_response_length": origin_response_length,
+    }
+    
     return {
-        "overall": 0.7 * accuracy_score + 0.15 * format_score + 0.15 * length_reward,
+        "overall": overall_score,
         "format": format_score,
         "accuracy": accuracy_score,
         "length_reward": length_reward,
-    }
+    }, eval_sample

@@ -131,6 +131,8 @@ class TrainerConfig:
     """validate only, skip training"""
     val_generations_to_log: int = 0
     """number of generations to log for validation"""
+    val_data_save_folder: Optional[str] = None
+    """folder to save validation data"""
     save_freq: int = -1
     """save frequency, -1 means no saving"""
     save_limit: int = -1

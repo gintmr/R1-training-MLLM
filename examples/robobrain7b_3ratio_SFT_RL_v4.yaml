@@ -89,7 +89,7 @@ worker:
     skip_special_tokens: false
 
 trainer:
-  total_epochs: 1
+  total_epochs: 2
   max_steps: null
   project_name: robobrain7b_3ratio_SFT_RL_v1
   experiment_name: robobrain7b_3ratio_SFT_RL_v1
@@ -105,6 +105,6 @@ trainer:
   save_limit: 2  # -1 to disable
   save_model_only: false
   save_checkpoint_path: null
-  load_checkpoint_path: /data2/wuxinrui/R1-training-MLLM/checkpoints/robobrain7b_3ratio_SFT_RL_v1/robobrain7b_3ratio_SFT_RL_v3/global_step_17
+  load_checkpoint_path: null
   find_last_checkpoint: true
   

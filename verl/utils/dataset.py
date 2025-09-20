@@ -39,9 +39,6 @@ def collate_fn(features: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 
-
-
-
     # budget = int(os.getenv('budget', '100'))
     # stage = int(os.getenv('stage', '1'))
     # non_tensors["stage"] = np.array([stage] * len(features), dtype=object)
@@ -122,6 +119,7 @@ class RLHFDataset(Dataset):
         max_pixels: Optional[int] = None,
         filter_overlong_prompts: bool = True,
         filter_overlong_prompts_workers: int = 16,
+        current_budget: int = 100,
     ):
         self.tokenizer = tokenizer
         self.processor = processor
@@ -135,8 +133,10 @@ class RLHFDataset(Dataset):
         self.truncation = truncation
         self.min_pixels = min_pixels
         self.max_pixels = max_pixels
-        budget = int(os.getenv('budget', '100'))
+
+        budget = current_budget
         self.budget = budget
+
         if "@" in data_path:
             data_path, data_split = data_path.split("@")
         else:
@@ -325,6 +325,6 @@ class RLHFDataset(Dataset):
         example["position_ids"] = position_ids
         example["raw_prompt_ids"] = raw_prompt_ids
         example["ground_truth"] = example.pop(self.answer_key)
-        # example["budget"] = self.budget
+        example["budget"] = torch.tensor(self.budget)
         
         return example

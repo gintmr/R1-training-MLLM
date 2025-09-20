@@ -62,6 +62,10 @@ from .metrics import (
     reduce_metrics,
 )
 
+from .data_loader import create_dataloader
+import random
+
+
 
 class Role(IntEnum):
     """
@@ -251,6 +255,9 @@ class RayPPOTrainer:
 
         config.worker.actor.optim.training_steps = self.training_steps
         config.worker.critic.optim.training_steps = self.training_steps
+        self.val_data_save_folder = config.trainer.val_data_save_folder 
+        
+        
         print(f"Total training steps: {self.training_steps}")
 
     def init_workers(self) -> None:
@@ -344,6 +351,8 @@ class RayPPOTrainer:
         checkpointer_tracker_path = os.path.join(self.config.trainer.save_checkpoint_path, CHECKPOINT_TRACKER)
         with open(checkpointer_tracker_path, "w") as f:
             json.dump(checkpointer_tracker_info, f, ensure_ascii=False, indent=2)
+            
+        merge_model_shards(local_dir=actor_path)
 
 
 
@@ -423,12 +432,13 @@ class RayPPOTrainer:
         sample_inputs, sample_outputs, sample_labels, sample_scores = [], [], [], []
         reward_metrics_lst = defaultdict(list)
         length_metrics_lst = defaultdict(list)
+        all_eval_sample_list = []
         print("Start validation...")
         self.actor_rollout_ref_wg.prepare_rollout_engine()
         for batch_dict in self.val_dataloader:
             test_batch = DataProto.from_single_dict(batch_dict)
             test_gen_batch = test_batch.pop(
-                batch_keys=["input_ids", "attention_mask", "position_ids"],
+                batch_keys=["input_ids", "attention_mask", "position_ids", "budget"],
                 non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
             )
             repeat_times = self.config.worker.rollout.val_override_config.get("n", 1)
@@ -446,7 +456,11 @@ class RayPPOTrainer:
             test_batch = test_batch.union(test_output_gen_batch)
 
             # evaluate using reward_function
-            reward_tensor, reward_metrics = ray.get(self.val_reward_fn.compute_reward.remote(test_batch))
+            reward_tensor, reward_metrics, *rest = ray.get(self.val_reward_fn.compute_reward.remote(test_batch))
+            batch_eval_sample_list = rest[0] if len(rest) > 0 else None
+            if batch_eval_sample_list is not None:
+                all_eval_sample_list.extend(batch_eval_sample_list)
+
 
             # store generations
             input_ids = test_batch.batch["prompts"]
@@ -476,7 +490,18 @@ class RayPPOTrainer:
         #g 更新当前accu
         self.current_reward_accu = val_reward_metrics['val/accuracy_reward']
         self.max_accu = max(self.max_accu, self.current_reward_accu)
-
+        
+        
+        # experiment name, model name, budget, stage
+        all_eval_sample_list.append(val_reward_metrics)
+        all_eval_sample_list.append(val_length_metrics)
+        if self.val_data_save_folder is not None:
+            os.makedirs(self.val_data_save_folder, exist_ok=True)
+            all_eval_samples_json_path = os.path.join(self.val_data_save_folder, f"step_{self.global_step}_reward_{self.current_reward_accu}.json")
+            with open(all_eval_samples_json_path, "w") as f:
+                json.dump(all_eval_sample_list, f, ensure_ascii=False, indent=2)
+            print(f"Validation samples with reward saved to {all_eval_samples_json_path}.")
+            # print( all_eval_sample_list)
 
         return {"val/reward_score": self.val_reward_score, **val_reward_metrics, **val_length_metrics}
 
@@ -522,7 +547,7 @@ class RayPPOTrainer:
 
             # pop those keys for generation
             gen_batch = new_batch.pop(
-                batch_keys=["input_ids", "attention_mask", "position_ids"],
+                batch_keys=["input_ids", "attention_mask", "position_ids", "budget"],
                 non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
                 meta_info_keys=["min_pixels", "max_pixels", "video_fps"],
             )
@@ -607,6 +632,20 @@ class RayPPOTrainer:
         self._load_checkpoint()
         main_tqdm.update(self.global_step)
 
+        #g ==============> New dataloader <================
+        self.current_epoch = self.global_step // len(self.train_dataloader)
+        all_epochs_budget_list = self.config.worker.rollout.all_epochs_budget_list
+        print(f"all_epochs_budget_list = {all_epochs_budget_list}!!!")
+        if all_epochs_budget_list != []:
+            budget_list = all_epochs_budget_list[self.current_epoch]
+            current_budget = random.choice(budget_list)
+            print(f"current_budget = {current_budget}, new build dataloader!")
+            self.train_dataloader, self.val_dataloader = create_dataloader(self.config.data, self.tokenizer, self.processor, current_budget=current_budget)
+        else:
+            raise ValueError("all_epochs_budget_list is empty")
+        #g ==============> New dataloader <================
+
+
         # perform validation before training
         # currently, we only support validation using the reward_function.
         if self.val_reward_fn is not None and self.config.trainer.val_before_train:
@@ -615,9 +654,26 @@ class RayPPOTrainer:
             if self.config.trainer.val_only:
                 return
 
-        self.data_iterator = iter(self.train_dataloader)
+
+        # self.data_iterator = iter(self.train_dataloader)
+        self.data_iterator = None
         while self.global_step < self.training_steps:
-            self.global_step += 1
+            #g ==============> New dataloader <================
+            self.current_epoch = self.global_step // len(self.train_dataloader)
+            all_epochs_budget_list = self.config.worker.rollout.all_epochs_budget_list
+            print(f"all_epochs_budget_list = {all_epochs_budget_list}!!!")
+            if all_epochs_budget_list != []:
+                budget_list = all_epochs_budget_list[self.current_epoch]
+                current_budget = random.choice(budget_list)
+                print(f"current_budget = {current_budget}, new build dataloader!")
+                self.train_dataloader, self.val_dataloader = create_dataloader(self.config.data, self.tokenizer, self.processor, current_budget=current_budget)
+                self.data_iterator = iter(self.train_dataloader)
+            else:
+                raise ValueError("all_epochs_budget_list is empty")
+            #g ==============> New dataloader <================
+            
+            self.global_step += 1 #g step从0到n - 1，一共n个
+
 
             metrics, timing_raw = {}, {}
             with timer("step", timing_raw):
@@ -660,7 +716,7 @@ class RayPPOTrainer:
                 with timer("adv", timing_raw):
                     if "token_level_scores" not in batch.batch:
                         # get token level scores asynchronously
-                        reward_tensor, reward_metrics = ray.get(reward_ref)
+                        reward_tensor, reward_metrics, *rest = ray.get(reward_ref)
                         batch.batch["token_level_scores"] = reward_tensor
                         reward_metrics = {f"reward/{k}": v for k, v in reduce_metrics(reward_metrics).items()}
                         metrics.update(reward_metrics)
